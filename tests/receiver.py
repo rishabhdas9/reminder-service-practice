@@ -5,7 +5,7 @@ It answers by path: /fail gives 500, /slow waits `slow_seconds` then gives 200,
 stalls `slow_seconds` before (never) sending the promised body, and anything
 else gives 200.
 
-Run it by hand to watch callbacks arrive:  uv run python tests/receiver.py 9000
+Run it by hand to watch callbacks arrive:  uv run python tests/receiver.py 9000 [slow_seconds]
 """
 
 import sys
@@ -133,8 +133,10 @@ def wait_for(predicate, timeout: float = 5.0, interval: float = 0.02) -> None:
 
 
 # Manual mode: serves on the port given on the command line and prints each request.
+# An optional second argument sets how long /slow waits (default 2s).
 if __name__ == "__main__":
-    receiver = Receiver(port=int(sys.argv[1]), echo=True)
+    slow = float(sys.argv[2]) if len(sys.argv) > 2 else 2.0
+    receiver = Receiver(port=int(sys.argv[1]), slow_seconds=slow, echo=True)
     print(f"Listening on {receiver.url('/')} - press Ctrl+C to stop", flush=True)
     try:
         threading.Event().wait()
