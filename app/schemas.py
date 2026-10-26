@@ -16,9 +16,10 @@ FIRE_AT_ERROR = "fire_at must be an ISO 8601 UTC time ending in Z or +00:00"
 
 
 # The payload as compact JSON text. Used for both the size check and what gets
-# stored, so the two always agree.
+# stored, so the two always agree. NaN and Infinity are not valid JSON, so they
+# raise ValueError here (the payload check turns that into a 422).
 def dump_payload(value: JsonValue) -> str:
-    return json.dumps(value, separators=(",", ":"))
+    return json.dumps(value, separators=(",", ":"), allow_nan=False)
 
 
 # A UTC datetime as integer microseconds since the epoch (exact, no floats).

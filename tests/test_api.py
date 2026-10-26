@@ -96,6 +96,22 @@ def test_payload_size_limit(client):
     assert post(client, payload="x" * (64 * 1024 - 1)).status_code == 422
 
 
+# NaN and Infinity are not valid JSON; a payload containing them is refused (422), not stored.
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_payload_nan_and_infinity_rejected(client, token):
+    raw = '{"fire_at":"2030-01-01T00:00:00Z","callback_url":"http://example.com/h","payload":{"x":%s}}' % token
+    r = client.post("/reminders", content=raw, headers={"Content-Type": "application/json"})
+    assert r.status_code == 422
+
+
+# The 422 error body repeats the bad input, so it must stay valid JSON even when
+# that input is NaN (here in fire_at, which fails its own check).
+def test_nan_in_rejected_field_still_gives_422(client):
+    raw = '{"fire_at":NaN,"callback_url":"http://example.com/h","payload":1}'
+    r = client.post("/reminders", content=raw, headers={"Content-Type": "application/json"})
+    assert r.status_code == 422
+
+
 # Fields the API does not define are refused instead of silently dropped.
 def test_unknown_field_rejected(client):
     assert post(client, surprise="x").status_code == 422

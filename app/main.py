@@ -4,7 +4,9 @@ import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.schemas import Reminder, ReminderCreate, datetime_to_us, dump_payload
@@ -25,6 +27,15 @@ def create_app(db_path: str) -> FastAPI:
         yield
 
     app = FastAPI(lifespan=lifespan)
+
+    # Returns FastAPI's usual 422 error list, minus each error's copy of the bad
+    # input. The default list repeats the input, and a NaN or Infinity in it
+    # cannot be written as JSON (that turned the 422 into a 500). Dropping it
+    # also stops a 64 KB+ payload from being echoed back.
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        errors = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
     # Saves a new reminder and returns its id, plus a Location header pointing at it.
     @app.post("/reminders", status_code=201)
