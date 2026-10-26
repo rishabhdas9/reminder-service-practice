@@ -1,4 +1,5 @@
-"""The reminders web app: creates the FastAPI app and defines POST, GET and DELETE /reminders."""
+"""The reminders web app: creates the FastAPI app, defines POST, GET and DELETE /reminders,
+and runs the background sender (app/dispatcher.py) while the app is up."""
 
 import os
 import uuid
@@ -9,6 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
+from app.dispatcher import Dispatcher
 from app.schemas import Reminder, ReminderCreate, datetime_to_us, dump_payload
 from app.store import ReminderStore, now_us
 
@@ -16,15 +18,28 @@ NOT_FOUND = "Reminder not found"
 
 
 # Builds the app on top of one database file. Routes are defined inside so they
-# share this app's store without any module-level state.
-def create_app(db_path: str) -> FastAPI:
+# share this app's store without any module-level state. The keyword arguments
+# tune the background sender: seconds between checks, the total time allowed
+# for one send, and the most sends running at once.
+def create_app(
+    db_path: str, *, poll_interval: float = 1.0, send_timeout: float = 10.0, max_in_flight: int = 20
+) -> FastAPI:
     store = ReminderStore(db_path)
 
-    # Creates the database table when the server starts (not when this module is imported).
+    # On startup, creates the database table (not when this module is imported)
+    # and starts the background sender. On shutdown, stops the sender and waits
+    # for sends already in progress.
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         store.init_schema()
-        yield
+        dispatcher = Dispatcher(
+            store, poll_interval=poll_interval, send_timeout=send_timeout, max_in_flight=max_in_flight
+        )
+        dispatcher.start()
+        try:
+            yield
+        finally:
+            await dispatcher.stop()
 
     app = FastAPI(lifespan=lifespan)
 
