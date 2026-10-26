@@ -1,7 +1,9 @@
 """A small local HTTP server for tests that records every request it gets. Stdlib only.
 
 It answers by path: /fail gives 500, /slow waits `slow_seconds` then gives 200,
-/redirect gives 302 pointing at /ok, and anything else gives 200.
+/redirect gives 302 pointing at /ok, /stall-body sends 200 headers but then
+stalls `slow_seconds` before (never) sending the promised body, and anything
+else gives 200.
 
 Run it by hand to watch callbacks arrive:  uv run python tests/receiver.py 9000
 """
@@ -43,6 +45,9 @@ class _Handler(BaseHTTPRequestHandler):
         receiver.record(Received(self.command, self.path, self.headers, body, time.time()))
         if self.path == "/slow":
             time.sleep(receiver.slow_seconds)
+        if self.path == "/stall-body":
+            self._stall_body(receiver.slow_seconds)
+            return
         status = {"/fail": 500, "/redirect": 302}.get(self.path, 200)
         try:
             self.send_response(status)
@@ -52,6 +57,18 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
         except (BrokenPipeError, ConnectionResetError):
             pass  # the client already gave up, as the timeout test makes it do
+
+    # Sends 200 headers promising a 1 MB body, then waits without sending it,
+    # like a callback server that streams a huge or endless response.
+    def _stall_body(self, seconds):
+        try:
+            self.send_response(200)
+            self.send_header("Content-Length", str(1024 * 1024))
+            self.end_headers()
+            self.wfile.flush()
+            time.sleep(seconds)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the client closed the connection without reading the body, as it should
 
     # Silences the default one-line-per-request log; Receiver(echo=True) prints instead.
     def log_message(self, format, *args):

@@ -129,6 +129,15 @@ def test_slow_receiver_times_out(live, receiver):
     assert body["error"].startswith("timed out")
 
 
+# Only the status code matters: a receiver that answers 200 but then stalls (or
+# streams a huge body) still counts as sent, because the body is never read.
+def test_response_body_is_not_read(live, receiver):
+    assert receiver.slow_seconds > SEND_TIMEOUT
+    body = wait_done(live, create(live, receiver.url("/stall-body"), {"n": 12}))
+    assert body["status"] == "sent"
+    assert body["response_status"] == 200
+
+
 # A redirect is not followed: the reminder fails with the 302, and /ok is never requested.
 def test_redirect_is_not_followed(live, receiver):
     body = wait_done(live, create(live, receiver.url("/redirect"), {"n": 8}))

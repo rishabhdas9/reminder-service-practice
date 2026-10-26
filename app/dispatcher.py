@@ -73,23 +73,26 @@ class Dispatcher:
             log.exception("dispatcher check failed")
 
     # Sends one claimed reminder once and records the outcome. The body is the
-    # stored JSON text exactly as saved, never re-serialized.
+    # stored JSON text exactly as saved, never re-serialized. Only the response's
+    # status code is used: streaming and closing without reading the body means a
+    # receiver that sends a huge (or endless) response can't fill our memory.
     async def _send(self, row: dict) -> None:
         reminder_id = row["id"]
         try:
             try:
                 async with asyncio.timeout(self.send_timeout):
-                    response = await self._client.post(
+                    async with self._client.stream(
+                        "POST",
                         row["callback_url"],
                         content=row["payload"].encode(),
                         headers={"Content-Type": "application/json"},
-                    )
+                    ) as response:
+                        status = response.status_code
             except TimeoutError:
                 recorded = await self._mark_failed(reminder_id, None, f"timed out after {self.send_timeout}s")
             except httpx.HTTPError as exc:
                 recorded = await self._mark_failed(reminder_id, None, f"{type(exc).__name__}: {exc}")
             else:
-                status = response.status_code
                 if 200 <= status < 300:
                     recorded = await asyncio.to_thread(self.store.mark_sent, reminder_id, status)
                 else:  # includes 3xx: redirects are not followed
