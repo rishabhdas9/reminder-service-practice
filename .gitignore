@@ -1,0 +1,12 @@
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+# Python / tooling
+.venv/
+__pycache__/
+.pytest_cache/
+# local SQLite databases (and their WAL/SHM side files)
+*.db
+*.db-*
+.DS_Store
+.remember/
+.superpowers/
