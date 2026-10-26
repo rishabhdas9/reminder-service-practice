@@ -11,7 +11,7 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.14 is pinned in `.python-ver
 ```sh
 uv sync
 uv run uvicorn app.main:app      # serves http://127.0.0.1:8000 (interactive docs at /docs)
-uv run pytest -q                 # 62 tests in about 12s, including end-to-end tests that start a real server
+uv run pytest -q                 # 66 tests in about 14s, including end-to-end tests that start a real server
 ```
 
 The database file is `reminders.db` in the current folder. Set `REMINDERS_DB=/path/to/file.db` to use another one.
@@ -32,7 +32,7 @@ Returns `201 Created` with header `Location: /reminders/<id>` and body `{"id": "
 |---|---|
 | `fire_at` | Required. An ISO 8601 time in UTC, ending in `Z` or `+00:00`. A time with no timezone, a different offset (like `+05:30`), or a Unix timestamp gets `422`. A time in the past (or right now) is accepted and fires on the next check, within about a second. |
 | `callback_url` | Required. An absolute `http` or `https` URL. Local and internal hosts such as `localhost` are allowed. |
-| `payload` | Required. Any JSON value (object, array, string, number, true/false, null), at most 64 KB once serialized. `NaN` and `Infinity` are rejected because they are not valid JSON. |
+| `payload` | Required. Any JSON value (object, array, string, number, true/false, null), at most 64 KB as compact UTF-8 JSON. `NaN`, `Infinity`, and text with lone surrogate characters are rejected because they can't be sent as valid JSON. |
 
 Unknown fields get `422`.
 
@@ -99,7 +99,7 @@ Guarantees, and how each is enforced:
 
 - One attempt per reminder. A `2xx` answer means `sent`. Anything else means `failed`, with the reason saved:
   - a non-2xx status, including `3xx` (redirects are not followed): `"HTTP <code>"`
-  - no complete answer within 10 seconds in total: `"timed out after 10.0s"`
+  - no response status within 10 seconds in total (connecting, sending, and waiting for the answer's headers): `"timed out after 10.0s"`
   - a connection problem: the error's name and message
 - The body is the payload exactly as stored, with `Content-Type: application/json`. Only the response's status code is read; its body is never read.
 - The sender checks once per second and runs at most 20 sends at a time.
@@ -108,7 +108,7 @@ Guarantees, and how each is enforced:
 
 - **SQLite with explicit transactions.** Every write is a short `BEGIN IMMEDIATE ... COMMIT`, so a crash leaves each reminder fully written or untouched. No transaction is ever held open during an HTTP call.
 - **The sender runs inside the API process**, started and stopped with the app. Shutdown waits for sends already in progress.
-- **Times** are stored as integer UTC microseconds and returned as ISO 8601 ending in `Z`, so they come back exactly as sent.
+- **Times** are stored as integer UTC microseconds and returned as ISO 8601 ending in `Z`, so they come back to the exact microsecond (a `+00:00` input is returned with `Z`).
 - **Random UUID ids**, so nobody can guess another person's reminder.
 - **Layout:** `app/store.py` (the only module with SQL), `app/schemas.py` (validation and response shape), `app/dispatcher.py` (sending), `app/main.py` (routes and startup). Tests live in `tests/`, including a small local HTTP receiver (`tests/receiver.py`).
 
@@ -127,7 +127,7 @@ Guarantees, and how each is enforced:
 ## Manual check: a crash during a send
 
 1. Start a receiver that holds `/slow` open for 60s and prints each request: `uv run python tests/receiver.py 9123 60`
-2. Start the server: `REMINDERS_DB=/tmp/crash.db .venv/bin/python -m uvicorn app.main:app --port 8123`
+2. Start the server: `REMINDERS_DB=/tmp/crash.db .venv/bin/python -m uvicorn app.main:app --port 8123`. Use `.venv/bin/python` rather than `uv run` so the process you `kill -9` is the server itself (killing `uv run` leaves the server running).
 3. POST a reminder with `fire_at` set to now and `callback_url` `http://127.0.0.1:9123/slow`. About 2 seconds later, GET shows `sending`.
-4. `kill -9` the server and start it again. GET still shows `sending`.
+4. Within 10 seconds of step 3 (after that, the send's own 10s timeout marks it `failed` "timed out" instead), `kill -9` the server and start it again. GET still shows `sending`.
 5. About 40 seconds after the send started, GET shows `failed` with "server stopped during delivery; outcome unknown". The receiver printed exactly one request.

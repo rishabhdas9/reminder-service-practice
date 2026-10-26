@@ -103,8 +103,9 @@ def test_never_sent_early(live, receiver):
 
 # A reminder cancelled before its fire_at is never sent, even 2s after fire_at.
 # A second reminder with the same fire_at proves the dispatcher did reach that moment.
+# fire_at is 2s out so the two POSTs and the DELETE finish first, even on a slow machine.
 def test_cancelled_is_never_sent(live, receiver):
-    fire_at = datetime.now(UTC) + timedelta(seconds=1)
+    fire_at = datetime.now(UTC) + timedelta(seconds=2)
     cancelled = create(live, receiver.url("/cancelled"), {"n": 4}, fire_at=fire_at.isoformat())
     control = create(live, receiver.url("/control"), {"n": 5}, fire_at=fire_at.isoformat())
     assert live.delete(f"/reminders/{cancelled}").status_code == 200

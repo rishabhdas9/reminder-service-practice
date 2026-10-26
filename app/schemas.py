@@ -15,11 +15,12 @@ MAX_PAYLOAD_BYTES = 64 * 1024
 FIRE_AT_ERROR = "fire_at must be an ISO 8601 UTC time ending in Z or +00:00"
 
 
-# The payload as compact JSON text. Used for both the size check and what gets
-# stored, so the two always agree. NaN and Infinity are not valid JSON, so they
-# raise ValueError here (the payload check turns that into a 422).
+# The payload as compact JSON text, with non-ASCII text kept as-is (sent as UTF-8).
+# Used for both the size check and what gets stored, so the two always agree.
+# NaN and Infinity are not valid JSON, so they raise ValueError here (the payload
+# check turns that into a 422).
 def dump_payload(value: JsonValue) -> str:
-    return json.dumps(value, separators=(",", ":"), allow_nan=False)
+    return json.dumps(value, separators=(",", ":"), allow_nan=False, ensure_ascii=False)
 
 
 # A UTC datetime as integer microseconds since the epoch (exact, no floats).
@@ -41,13 +42,13 @@ class ReminderCreate(BaseModel):
     callback_url: HttpUrl
     payload: JsonValue
 
-    # Accepts only a text timestamp in UTC. Pydantic's own parsing would also
-    # take Unix timestamps (numbers, or numeric text like "1700000000"), so we
-    # parse it ourselves first.
+    # Accepts only a text timestamp marked as UTC with "Z" or "+00:00". Pydantic's
+    # own parsing would also take Unix timestamps (numbers, or numeric text like
+    # "1700000000"), so we parse it ourselves first.
     @field_validator("fire_at", mode="before")
     @classmethod
     def fire_at_must_be_utc_text(cls, value):
-        if not isinstance(value, str):
+        if not isinstance(value, str) or not value.endswith(("Z", "+00:00")):
             raise ValueError(FIRE_AT_ERROR)
         try:
             parsed = datetime.fromisoformat(value)
@@ -57,11 +58,17 @@ class ReminderCreate(BaseModel):
             raise ValueError(FIRE_AT_ERROR)
         return parsed
 
-    # Refuses payloads whose stored JSON text is over the size limit.
+    # Refuses payloads that can't be stored and sent as JSON: over the size limit
+    # (measured in UTF-8 bytes), NaN or Infinity (dump_payload raises), or text
+    # with a lone surrogate, which cannot be written as UTF-8 at all.
     @field_validator("payload")
     @classmethod
     def payload_must_fit(cls, value):
-        if len(dump_payload(value).encode()) > MAX_PAYLOAD_BYTES:
+        try:
+            size = len(dump_payload(value).encode("utf-8"))
+        except UnicodeEncodeError:
+            raise ValueError("payload text must be valid Unicode (no lone surrogate characters)") from None
+        if size > MAX_PAYLOAD_BYTES:
             raise ValueError(f"payload must be at most {MAX_PAYLOAD_BYTES} bytes of JSON")
         return value
 

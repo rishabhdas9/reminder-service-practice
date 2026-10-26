@@ -58,7 +58,16 @@ def test_fire_at_accepted_and_returned_with_z(client, sent, returned):
 # fire_at must be an ISO 8601 UTC string: no zone, other offsets, numbers, and junk are refused.
 @pytest.mark.parametrize(
     "bad",
-    ["2026-10-26T10:00:00", "2026-10-26T10:00:00+05:30", 1700000000, "1700000000", "not a date", None],
+    [
+        "2026-10-26T10:00:00",
+        "2026-10-26T10:00:00+05:30",
+        "2026-10-26T10:00:00+0000",
+        "2026-10-26T10:00:00-00:00",
+        1700000000,
+        "1700000000",
+        "not a date",
+        None,
+    ],
 )
 def test_fire_at_rejected(client, bad):
     assert post(client, fire_at=bad).status_code == 422
@@ -104,12 +113,28 @@ def test_payload_nan_and_infinity_rejected(client, token):
     assert r.status_code == 422
 
 
-# The 422 error body repeats the bad input, so it must stay valid JSON even when
-# that input is NaN (here in fire_at, which fails its own check).
+# A NaN in a field that fails its own check (here fire_at) still gives a clean 422,
+# not a 500 (FastAPI's default 422 body would echo the NaN, which is not valid JSON).
 def test_nan_in_rejected_field_still_gives_422(client):
     raw = '{"fire_at":NaN,"callback_url":"http://example.com/h","payload":1}'
     r = client.post("/reminders", content=raw, headers={"Content-Type": "application/json"})
     assert r.status_code == 422
+
+
+# A payload with a lone surrogate (half of a UTF-16 pair, not real text) is refused;
+# accepting it would make GET and DELETE fail later, since it cannot be written as UTF-8.
+def test_payload_lone_surrogate_rejected(client):
+    raw = '{"fire_at":"2030-01-01T00:00:00Z","callback_url":"http://example.com/h","payload":"\\ud800"}'
+    r = client.post("/reminders", content=raw, headers={"Content-Type": "application/json"})
+    assert r.status_code == 422
+
+
+# Non-ASCII text is stored as UTF-8 and counts by its UTF-8 size (2 bytes per "é"),
+# not by escaped \\u sequences (6 bytes each), and comes back unchanged.
+def test_payload_non_ascii_counts_utf8_bytes(client):
+    text = "é" * 20_000  # 40,002 bytes as UTF-8 JSON; 120,002 if escaped
+    rid = create(client, payload=text)
+    assert client.get(f"/reminders/{rid}").json()["payload"] == text
 
 
 # Fields the API does not define are refused instead of silently dropped.

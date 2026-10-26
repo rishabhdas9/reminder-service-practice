@@ -1,5 +1,7 @@
 # Reminders API - design and build plan
 
+> The "Implementation rulings" section at the end overrides anything above it that disagrees.
+
 ## Context
 
 Interview take-home. Build a small FastAPI service that stores reminders and, when each one's `fire_at` time arrives, sends an HTTP POST to its `callback_url` with its `payload` as the JSON body. Reviewers will judge correctness, design reasoning, code, and tests.
@@ -178,3 +180,7 @@ No auth. SSRF: callbacks can reach internal addresses. No POST idempotency key, 
 6. **`fire_at` is parsed with `datetime.fromisoformat`** in a before-validator, which requires a string and a UTC offset of exactly 0. Pydantic's own datetime parsing also accepts Unix timestamps, including numeric strings.
 7. **Microseconds and datetimes are converted with exact integer arithmetic** (`EPOCH + timedelta(microseconds=us)`), never float timestamps, so times round-trip exactly.
 8. **`lease_until_us` is not cleared** after a send finishes. Nothing reads it once the status leaves `sending`.
+9. **Commits from slice 3 on go to the branch `dispatcher-and-e2e`** (the user asked for this). Slices 1 and 2 are on `main`.
+10. **The dispatcher reads only the callback's status code** (it streams the request and never reads the body), so a huge response can't fill memory.
+11. **The payload is stored as UTF-8 JSON** (`ensure_ascii=False`), so the 64 KB limit counts UTF-8 bytes. Text with lone surrogates gets a 422, because it can't be written as UTF-8 and would break GET and DELETE later.
+12. **The `fire_at` text must literally end in `Z` or `+00:00`** before it is parsed (the user's rule). `+0000` and `-00:00` get a 422.

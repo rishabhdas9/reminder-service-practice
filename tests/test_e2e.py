@@ -103,9 +103,10 @@ def test_full_flow_create_fire_get(server, receiver):
 
 # A reminder cancelled before its fire_at is never received. A second reminder
 # with the same fire_at proves the server did reach that moment (both are due
-# in the same check, so the cancelled one would have gone out with it).
+# in the same check, so the cancelled one would have gone out with it). fire_at is
+# 2s out so the two POSTs and the DELETE finish first, even on a slow machine.
 def test_cancelled_reminder_is_never_sent(server, receiver):
-    fire_at = utc_in(1)
+    fire_at = utc_in(2)
     cancelled = create(server, receiver.url("/cancelled"), {"n": 2}, fire_at)
     control = create(server, receiver.url("/control"), {"n": 3}, fire_at)
     r = server.delete(f"/reminders/{cancelled}")
