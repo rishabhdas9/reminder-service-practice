@@ -16,3 +16,5 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+# Starlette's TestClient now prefers httpx2; we keep the installed httpx (no new dependency).
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning"]
